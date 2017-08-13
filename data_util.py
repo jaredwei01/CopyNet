@@ -8,12 +8,12 @@ jieba.dt.tmp_dir = './'
 jieba.initialize()
 
 class Vocabulary(object):
-    def __init__(self, max_lines=10000, min_count=10):
+    def __init__(self, max_lines=10000000, min_count=10):
         self.max_lines = max_lines
         self.min_count = min_count
         self.line_counter = 0
         self.closed = False # if closed, should stop updating
-        self.special_words = [u"PAD", u"START", u"EOS", u"UNK"]
+        self.special_words = [u"PAD", u"START", u"END", u"UNK"]
         self.words = []
         self.word2id = {self.words[i]:i for i in range(len(self.words))}
         self.wordcount = {k:1 for k, _ in self.word2id.iteritems()}
@@ -31,11 +31,13 @@ class Vocabulary(object):
                 self.word2id[word] = len(self.words) - 1
                 self.wordcount[word] = 1
     
-    def build_from_file(self, filepath):
+    def build_from_file(self, filepath, verbose=True):
         # support filepaths ? [filename1, filename2,...]
         for line in open(filepath, 'r'):
             self.update(line)
             self.line_counter += 1
+            if verbose and self.line_counter % 10000 == 0:
+                print self.line_counter
             if (self.line_counter > self.max_lines):
                 break
         self.shrink()
@@ -61,10 +63,14 @@ class Vocabulary(object):
                        for word in self.tokenize(sentence)])
     
     def word_ids_to_sentence(self, word_ids):
-        assert self.closed, 'should close before use this vocabulary'
+        assert self.closed, 'should be closed before using this vocabulary'
         return u"".join(
             [self.words[word_id] if word_id < len(self.words) and word_id >= 0 else u"UNK" 
                 for word_id in word_ids])
+    
+    @property
+    def size(self):
+        return len(self.words)
     
     @property
     def details(self):
@@ -79,9 +85,58 @@ class Vocabulary(object):
         return self.details.encode('utf-8') # repr should return str
 
 
+class BatchData(object):
+    def __init__(self, vocabulary, max_seq_len = (5, 10), batch_size = 2):
+        self.vocabulary = vocabulary
+        self.max_seq_len = max_seq_len
+        self.batch_size = batch_size
+        # prepare for seq2seq model
+        self.encoder_inputs = self._get_default_array(max_seq_len[0])
+        self.decoder_inputs = self._get_default_array(max_seq_len[1])
+        self.decoder_outputs = self._get_default_array(max_seq_len[1])
+        # record actual length
+        self.encoder_inputs_lengths = []
+        self.decoder_inputs_lengths = []
+        self.decoder_outputs_lengths = []
+        # counter
+        self.counter = 0 
+
+    def _get_default_array(self, length):
+        return np.ones((self.batch_size, length), 
+                dtype='int32') * self.vocabulary.word2id[u"PAD"]
+
+    def append(self, data):
+        '''
+        update encoder/decoder inputs/outputs
+        '''
+        assert self.counter < self.batch_size, "out of batch_size"
+        self.counter += 1
+        source, target = data
+        # truncate and reverse source
+        source = source[0:self.max_seq_len[0]]
+        source.reverse()
+        self.encoder_inputs_lengths.append(len(source))
+        self.encoder_inputs[self.counter - 1][0:len(source)] = source
+
+        # Add u"START" to target for input
+        target = [self.vocabulary.word2id[u"START"]] + target
+        target = target[0:self.max_seq_len[1]]
+        self.decoder_inputs_lengths.append(len(target))
+        self.decoder_inputs[self.counter - 1][0:len(target)] = target
+
+        # Remove u"START" and Add u"END" to target for output
+        target = target[1:] + [self.vocabulary.word2id[u"END"]]
+        self.decoder_outputs_lengths.append(len(target))
+        self.decoder_outputs[self.counter - 1][0:len(target)] = target
+
+
+
 class Dataset(object):
-    def __init__(self, vocabulary, filepath, name='dataset', batch_size=3):
+    def __init__(self, vocabulary, filepath, 
+            max_sequence_length=(20, 100), name='seq2seq dataset', batch_size=2):
+        self.vocabulary = vocabulary
         self.filepath = filepath
+        self.max_seq_len = max_sequence_length
         self.name = name
         self.batch_size = batch_size
         self.dataset = np.array([map(vocabulary.sentence_to_word_ids, line.split('\t')[0:2])
@@ -90,6 +145,10 @@ class Dataset(object):
         
     def __len__(self):
         return len(self.dataset)
+    
+    @property
+    def size(self):
+        return self.__len__()
         
     def __getitem__(self, index):
         assert index >= 0 and index < self.__len__(), 'invalid index'
@@ -100,10 +159,14 @@ class Dataset(object):
         while index < self.__len__():
             yield self.__getitem__(index)
             index += 1
-    
+
     def next_batch(self):
-        indices = [random.randint(0, self.__len__() - 1) for i in range(self.batch_size)]
-        return self.dataset[indices]
+        # padding, add EOF symbol to decoder inputs
+        batchdata = BatchData(self.vocabulary, self.max_seq_len, self.batch_size)
+        for i in range(self.batch_size):
+            index = random.randint(0, self.__len__() - 1)
+            batchdata.append(self.dataset[index])
+        return batchdata
 
     @property
     def details(self):
@@ -140,9 +203,6 @@ def test_dataset():
     print type(dataset[0])
     print dataset[0], '\n'
     
-    print type(dataset.next_batch())
-    print dataset.next_batch()
-
 
 if __name__ == '__main__':
     test_dataset()

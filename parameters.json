@@ -1,0 +1,8 @@
+{
+	"batch_size" : 1,
+	"embedding_size" : 300,
+	"encoder_hidden_size" : 300,
+	"decoder_hidden_size" : 300,
+	"encoder_max_sequence_length" : 20,
+	"decoder_max_sequence_length" : 100
+}
