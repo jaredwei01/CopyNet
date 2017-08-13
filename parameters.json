@@ -1,8 +1,13 @@
 {
-	"batch_size" : 1,
-	"embedding_size" : 300,
-	"encoder_hidden_size" : 300,
-	"decoder_hidden_size" : 300,
-	"encoder_max_sequence_length" : 20,
-	"decoder_max_sequence_length" : 100
+    "dataset_filepath": "small.txt",
+	"batch_size": 10,
+	"embedding_size": 300,
+	"encoder_hidden_size": 300,
+	"decoder_hidden_size": 300,
+	"encoder_max_seq_len": 20,
+	"decoder_max_seq_len": 100,
+    "learning_rate": 1e-3,
+    "max_grad_norm": 2,
+    "max_epoch": 10,
+    "nothing": 0
 }

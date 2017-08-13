@@ -1,0 +1,11 @@
+# ignore all compiled python files
+*.pyc
+
+# ignore ipython checkpoints
+.ipynb_checkpoints
+
+# jieba cache
+jieba.cache
+
+# dataset
+keysent.201*
