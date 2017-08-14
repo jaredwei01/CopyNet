@@ -1,6 +1,6 @@
 {
     "dataset_filepath": "small.txt",
-	"batch_size": 10,
+	"batch_size": 100,
 	"embedding_size": 300,
 	"encoder_hidden_size": 300,
 	"decoder_hidden_size": 300,
@@ -8,6 +8,6 @@
 	"decoder_max_seq_len": 100,
     "learning_rate": 1e-3,
     "max_grad_norm": 2,
-    "max_epoch": 10,
+    "max_epoch": 1000,
     "nothing": 0
 }

@@ -130,6 +130,14 @@ class BatchData(object):
         self.decoder_outputs_lengths.append(len(target))
         self.decoder_outputs[self.counter - 1][0:len(target)] = target
 
+    def shrink(self):
+        # truncate encoder/decoder inputs/outputs
+        encoder_max_seq_len = max(self.encoder_inputs_lengths)
+        decoder_max_seq_len = max(self.decoder_inputs_lengths)
+        self.encoder_inputs = self.encoder_inputs[:, 0:encoder_max_seq_len]
+        self.decoder_inputs = self.decoder_inputs[:, 0:decoder_max_seq_len]
+        self.decoder_outputs = self.decoder_outputs[:, 0:decoder_max_seq_len]
+
 
 class Dataset(object):
     def __init__(self, vocabulary, config):
@@ -163,6 +171,7 @@ class Dataset(object):
         for i in range(self.config.batch_size):
             index = random.randint(0, self.size - 1)
             batchdata.append(self.dataset[index])
+        batchdata.shrink()
         return batchdata
 
     @property

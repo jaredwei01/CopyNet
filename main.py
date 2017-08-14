@@ -2,6 +2,8 @@ from zutil.config import Config
 import tensorflow as tf
 import data_util
 
+from tensorflow.python.layers import core as layers_core
+
 config = Config('parameters.json')
 
 # prepare data
@@ -10,12 +12,9 @@ vocab.build_from_file('small.txt')
 dataset = data_util.Dataset(vocab, config)
 
 # placeholder for inputs
-encoder_inputs = tf.placeholder(tf.int32, shape=(config.batch_size,
-                                                 config.encoder_max_seq_len))
-decoder_inputs = tf.placeholder(tf.int32, shape=(config.batch_size,
-                                                 config.decoder_max_seq_len))
-decoder_outputs = tf.placeholder(tf.int32, shape=(config.batch_size,
-                                                  config.decoder_max_seq_len))
+encoder_inputs = tf.placeholder(tf.int32, shape=(config.batch_size, None))
+decoder_inputs = tf.placeholder(tf.int32, shape=(config.batch_size, None))
+decoder_outputs = tf.placeholder(tf.int32, shape=(config.batch_size, None))
 
 # placeholder for sequence lengths
 encoder_inputs_lengths = tf.placeholder(tf.int32, shape=(config.batch_size,))
@@ -44,20 +43,30 @@ def build_model():
     helper = tf.contrib.seq2seq.TrainingHelper(
         decoder_inputs_emb, decoder_inputs_lengths, time_major=False)
     decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.decoder_hidden_size)
+    projection_layer = layers_core.Dense(vocab.size, use_bias=False)
     decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,
-                                              helper, encoder_state)
-    outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder)
-    logits = outputs.rnn_output
-    print 'logits = ', logits
+                                              helper,
+                                              encoder_state,
+                                              output_layer=projection_layer)
+    final_outputs, final_state, seq_lens = \
+        tf.contrib.seq2seq.dynamic_decode(decoder,
+                                          impute_finished=True,
+                                          swap_memory=True)
+    logits = final_outputs.rnn_output
 
     # loss
-    # total_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-    #        labels=decoder_outputs, logits=logits)
-    loss = tf.contrib.seq2seq.sequence_loss(
-        logits,
-        decoder_outputs,
-        tf.ones([config.batch_size, config.decoder_max_seq_len]),
-    )
+    crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=decoder_outputs, logits=logits)
+    max_seq_len = logits.shape[1].value
+    target_weights = tf.sequence_mask(decoder_inputs_lengths, max_seq_len, 
+                                        dtype=tf.float32)
+    loss = tf.reduce_sum(crossent * target_weights / tf.to_float(
+        config.batch_size))
+    # loss = tf.contrib.seq2seq.sequence_loss(
+    #    logits,
+    #    decoder_outputs,
+    #    target_weights,
+    # )
 
     # gradient clip
     params = tf.trainable_variables()
@@ -89,7 +98,7 @@ def train():
                 encoder_inputs_lengths: batch.encoder_inputs_lengths,
                 decoder_inputs_lengths: batch.decoder_inputs_lengths
             })
-            print 'loss = ', loss
+            print 'epoch = %d, loss = %f' % (epoch, loss)
 
 
 if __name__ == '__main__':
