@@ -36,6 +36,7 @@ class Vocabulary(object):
     def build_from_file(self, filepath, verbose=True):
         # support filepaths ? [filename1, filename2,...]
         for line in open(filepath, 'r'):
+            line = "".join(line.split('\t')[0:2])
             self.update(line)
             self.line_counter += 1
             if verbose and self.line_counter % 10000 == 0:
@@ -112,7 +113,7 @@ class BatchData(object):
         '''
         assert self.counter < self.config.batch_size, "out of batch_size"
         self.counter += 1
-        source, target = data
+        target, source = data
         # truncate and reverse source
         source = source[0:self.config.encoder_max_seq_len]
         source.reverse()

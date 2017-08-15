@@ -25,33 +25,42 @@ def build_model():
     # embedding maxtrix
     embedding_matrix = tf.get_variable("embedding_matrix", [
         vocab.size, config.embedding_size])
-    encoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix,
-                                                encoder_inputs)
-    decoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix,
-                                                decoder_inputs)
+    encoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, encoder_inputs)
+    decoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, decoder_inputs)
 
     # encoder
     encoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.encoder_hidden_size)
     encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
-            encoder_cell,
-            encoder_inputs_emb,
-            sequence_length=encoder_inputs_lengths,
-            time_major=False,
-            dtype=tf.float32)
+                                encoder_cell,
+                                encoder_inputs_emb,
+                                sequence_length=encoder_inputs_lengths,
+                                time_major=False,
+                                dtype=tf.float32)
+
+    # attention wrapper for decoder_cell
+    attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+                            config.decoder_hidden_size, 
+                            encoder_outputs, 
+                            memory_sequence_length=encoder_inputs_lengths)
+    decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.decoder_hidden_size)
+    decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+                        decoder_cell, 
+                        attention_mechanism, 
+                        attention_layer_size=config.encoder_hidden_size)
 
     # decoder
-    helper = tf.contrib.seq2seq.TrainingHelper(
-        decoder_inputs_emb, decoder_inputs_lengths, time_major=False)
-    decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.decoder_hidden_size)
+    decoder_initial_state = decoder_cell.zero_state(config.batch_size, 
+                                                    dtype=tf.float32)
+    helper = tf.contrib.seq2seq.TrainingHelper(decoder_inputs_emb, 
+                                               decoder_inputs_lengths, 
+                                               time_major=False)
     projection_layer = layers_core.Dense(vocab.size, use_bias=False)
     decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,
                                               helper,
-                                              encoder_state,
+                                              decoder_initial_state,
                                               output_layer=projection_layer)
     final_outputs, final_state, seq_lens = \
-        tf.contrib.seq2seq.dynamic_decode(decoder,
-                                          impute_finished=True,
-                                          swap_memory=True)
+                        tf.contrib.seq2seq.dynamic_decode(decoder)
     logits = final_outputs.rnn_output
 
     # loss
@@ -62,11 +71,6 @@ def build_model():
                                         dtype=tf.float32)
     loss = tf.reduce_sum(crossent * target_weights / tf.to_float(
         config.batch_size))
-    # loss = tf.contrib.seq2seq.sequence_loss(
-    #    logits,
-    #    decoder_outputs,
-    #    target_weights,
-    # )
 
     # gradient clip
     params = tf.trainable_variables()
@@ -91,13 +95,14 @@ def train():
         sess.run(tf.global_variables_initializer())
         for epoch in range(config.max_epoch):
             batch = dataset.next_batch()
-            loss, _ = sess.run(fetches, feed_dict={
+            feed_dict = {
                 encoder_inputs: batch.encoder_inputs,
                 decoder_inputs: batch.decoder_inputs,
                 decoder_outputs: batch.decoder_outputs,
                 encoder_inputs_lengths: batch.encoder_inputs_lengths,
                 decoder_inputs_lengths: batch.decoder_inputs_lengths
-            })
+            }
+            loss, _ = sess.run(fetches, feed_dict=feed_dict)
             print 'epoch = %d, loss = %f' % (epoch, loss)
 
 
