@@ -1,13 +1,16 @@
 {
-    "dataset_filepath": "small.txt",
+	"dataset_filepath": "train.txt",
 	"batch_size": 100,
 	"embedding_size": 300,
 	"encoder_hidden_size": 300,
 	"decoder_hidden_size": 300,
 	"encoder_max_seq_len": 20,
 	"decoder_max_seq_len": 100,
-    "learning_rate": 1e-2,
-    "max_grad_norm": 5,
-    "max_epoch": 1000,
-    "nothing": 0
+	"learning_rate": 1e-3,
+	"max_grad_norm": 5,
+	"max_batchid": 1000,
+	"save_freq": 10,
+	"eval_freq": 1,
+	"infer_freq": 1,
+	"nothing": 0
 }
