@@ -6,7 +6,7 @@
 	"decoder_hidden_size": 300,
 	"encoder_max_seq_len": 20,
 	"decoder_max_seq_len": 100,
-	"learning_rate": 1e-3,
+	"learning_rate": 1e-2,
 	"max_grad_norm": 5,
 	"max_batchid": 1000,
 	"save_freq": 10,

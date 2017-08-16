@@ -10,7 +10,7 @@ jieba.initialize()
 
 
 class Vocabulary(object):
-    def __init__(self, max_lines=10000000, min_count=10):
+    def __init__(self, max_lines=10000000, min_count=5):
         self.max_lines = max_lines
         self.min_count = min_count
         self.line_counter = 0
@@ -116,7 +116,7 @@ class BatchData(object):
         target, source = data
         # truncate and reverse source
         source = source[0:self.config.encoder_max_seq_len]
-        source.reverse()
+        #source.reverse()
         self.encoder_inputs_lengths.append(len(source))
         self.encoder_inputs[self.counter - 1][0:len(source)] = source
 

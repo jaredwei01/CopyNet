@@ -1,6 +1,8 @@
 from zutil.config import Config
 import tensorflow as tf
 import data_util
+import random
+import seq2seq # from local directory
 
 from tensorflow.python.layers import core as layers_core
 
@@ -8,7 +10,8 @@ config = Config('parameters.json')
 
 # prepare data
 vocab = data_util.Vocabulary()
-vocab.build_from_file('train.txt')
+vocab.build_from_file('small.txt')
+print 'got %d words' % (vocab.size)
 train_data = data_util.Dataset(vocab, config.copy(dataset_filepath='train.txt'))
 eval_data = data_util.Dataset(vocab, config.copy(dataset_filepath='eval.txt'))
 infer_data = data_util.Dataset(vocab, config.copy(dataset_filepath='infer.txt'))
@@ -41,12 +44,12 @@ def build_model(mode='train'):
                                 dtype=tf.float32)
 
     # attention wrapper for decoder_cell
-    attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+    attention_mechanism = seq2seq.LuongAttention(
                             config.decoder_hidden_size, 
                             encoder_outputs, 
                             memory_sequence_length=encoder_inputs_lengths)
     decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.decoder_hidden_size)
-    decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+    decoder_cell = seq2seq.AttentionWrapper(
                         decoder_cell, 
                         attention_mechanism, 
                         attention_layer_size=config.encoder_hidden_size)
@@ -57,33 +60,33 @@ def build_model(mode='train'):
     if mode == 'infer':
         decoder_initial_state = decoder_cell.zero_state(config.batch_size, 
                                                     dtype=tf.float32)
-        helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+        helper = seq2seq.GreedyEmbeddingHelper(
                     embedding_matrix, 
                     tf.fill([config.batch_size], vocab.word2id[u"START"]),
                     vocab.word2id[u"END"])
         projection_layer = layers_core.Dense(vocab.size, use_bias=False)
-        decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,
+        decoder = seq2seq.BasicDecoder(decoder_cell,
                                                   helper,
                                                   decoder_initial_state,
                                                   output_layer=projection_layer)
         maximum_iterations = tf.round(tf.reduce_max(encoder_inputs_lengths) * 2)
         final_outputs, final_state, seq_len = \
-                tf.contrib.seq2seq.dynamic_decode(decoder,
+                seq2seq.dynamic_decode(decoder,
                                     maximum_iterations=maximum_iterations)
         translations = final_outputs.sample_id
         return translations
 
     # train or eval mode
-    helper = tf.contrib.seq2seq.TrainingHelper(decoder_inputs_emb, 
+    helper = seq2seq.TrainingHelper(decoder_inputs_emb, 
                                                decoder_inputs_lengths, 
                                                time_major=False)
     projection_layer = layers_core.Dense(vocab.size, use_bias=False)
-    decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,
+    decoder = seq2seq.BasicDecoder(decoder_cell,
                                               helper,
                                               decoder_initial_state,
                                               output_layer=projection_layer)
     final_outputs, final_state, seq_lens = \
-                        tf.contrib.seq2seq.dynamic_decode(decoder)
+                        seq2seq.dynamic_decode(decoder)
     logits = final_outputs.rnn_output
 
     # loss
@@ -161,17 +164,21 @@ def train():
             if (batchid + 1) % config.infer_freq == 0:
                 infer_batch = infer_data.next_batch()
                 feed_dict = {
-
-                    encoder_inputs: eval_batch.encoder_inputs,
-                    decoder_inputs: eval_batch.decoder_inputs,
-                    decoder_outputs: eval_batch.decoder_outputs,
-                    encoder_inputs_lengths: eval_batch.encoder_inputs_lengths,
-                    decoder_inputs_lengths: eval_batch.decoder_inputs_lengths
+                    encoder_inputs: train_batch.encoder_inputs,
+                    decoder_inputs: train_batch.decoder_inputs,
+                    decoder_outputs: train_batch.decoder_outputs,
+                    encoder_inputs_lengths: train_batch.encoder_inputs_lengths,
+                    decoder_inputs_lengths: train_batch.decoder_inputs_lengths
                 }
                 word_ids = sess.run(translations, feed_dict=feed_dict)
-                print '\nbatchid = %d, translations = %s' % (batchid, word_ids)
-                print word_ids.shape
-                print type(word_ids)
+                print 'batchid = %d' % (batchid)
+                index = random.randint(0, 39)
+                print 'input:', vocab.word_ids_to_sentence(
+                        train_batch.encoder_inputs[index]), '\n'
+                print 'output:', vocab.word_ids_to_sentence(
+                        train_batch.decoder_inputs[index]), '\n'
+                print 'predict:', vocab.word_ids_to_sentence(
+                        word_ids[index]), '\n'
 
 
 if __name__ == '__main__':

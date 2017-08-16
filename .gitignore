@@ -9,3 +9,4 @@ jieba.cache
 
 # dataset
 keysent.201*
+*.txt
