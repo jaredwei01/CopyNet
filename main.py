@@ -77,13 +77,14 @@ def build_model(mode='train'):
         return translations
 
     # train or eval mode
-    helper = seq2seq.TrainingHelper(decoder_inputs_emb, 
+    helper = seq2seq.CopyNetTrainingHelper(decoder_inputs_emb, encoder_inputs,
                                                decoder_inputs_lengths, 
                                                time_major=False)
     projection_layer = layers_core.Dense(vocab.size, use_bias=False)
-    decoder = seq2seq.BasicDecoder(decoder_cell,
+    decoder = seq2seq.CopyNetDecoder(decoder_cell,
                                               helper,
                                               decoder_initial_state,
+                                              encoder_outputs,
                                               output_layer=projection_layer)
     final_outputs, final_state, seq_lens = \
                         seq2seq.dynamic_decode(decoder)

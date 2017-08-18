@@ -40,6 +40,7 @@ from tensorflow.python.util import nest
 __all__ = [
     "Helper",
     "TrainingHelper",
+    "CopyNetTrainingHelper",
     "GreedyEmbeddingHelper",
     "SampleEmbeddingHelper",
     "CustomHelper",
@@ -200,6 +201,31 @@ class TrainingHelper(Helper):
           all_finished, lambda: self._zero_inputs,
           lambda: nest.map_structure(read_from_ta, self._input_tas))
       return (finished, next_inputs, state)
+
+
+class CopyNetTrainingHelper(TrainingHelper):
+    """A helper for use during training.  Only reads inputs.
+
+    Returned sample_ids are the argmax of the RNN output logits.
+    """
+
+    def __init__(self, inputs, encoder_inputs_ids, sequence_length, 
+                                    time_major=False, name=None):
+        """Initializer.
+
+        Args:
+          inputs: A (structure of) input tensors.
+          sequence_length: An int32 vector tensor.
+          time_major: Python bool. Whether the tensors in `inputs` are time major.
+            If `False` (default), they are assumed to be batch major.
+          name: Name scope for any created operations.
+
+        Raises:
+          ValueError: if `sequence_length` is not a 1D tensor.
+        """
+        super(CopyNetTrainingHelper, self).__init__(inputs, sequence_length,
+                time_major=time_major, name=name)
+        self.encoder_inputs_ids = encoder_inputs_ids
 
 
 class ScheduledEmbeddingTrainingHelper(TrainingHelper):

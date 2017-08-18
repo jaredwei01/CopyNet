@@ -30,10 +30,12 @@ from tensorflow.python.layers import base as layers_base
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.util import nest
 
+import tensorflow as tf
 
 __all__ = [
     "BasicDecoderOutput",
     "BasicDecoder",
+    "CopyNetDecoder",
 ]
 
 
@@ -148,3 +150,76 @@ class BasicDecoder(decoder.Decoder):
           sample_ids=sample_ids)
     outputs = BasicDecoderOutput(cell_outputs, sample_ids)
     return (outputs, next_state, next_inputs, finished)
+
+
+class CopyNetDecoder(BasicDecoder):
+    """
+    copynet decoder, refer to the paper Jiatao Gu, 2016, 
+    'Incorporating Copying Mechanism in Sequence-to-Sequence Learninag'
+    https://arxiv.org/abs/1603.06393
+    """
+    def __init__(self, cell, helper, initial_state, encoder_outputs, output_layer):
+        """Initialize CopyNetDecoder.
+        """
+        if output_layer is None:
+            raise ValueError("output_layer should not be None")
+        #assert isinstance(helper, helper_py.CopyNetTrainingHelper)
+        self.encoder_outputs = encoder_outputs
+        encoder_hidden_size = self.encoder_outputs.shape[-1].value
+        self.copy_weight = tf.get_variable('copy_weight', [encoder_hidden_size, 
+                                                    cell.output_size])
+      
+        super(CopyNetDecoder, self).__init__(cell, helper, initial_state, 
+                                    output_layer=output_layer)
+    
+    def shape(self, tensor):
+        s = tensor.get_shape()
+        return tuple([s[i].value for i in range(0, len(s))])
+
+    def _mix(self, generate_scores, copy_scores):
+        # print generate_scores.shape # (B, V)
+        # print copy_scores.shape     # (B, input_seq_len)
+        # print self._helper.inputs_ids # (B, input_seq_len)
+        # tf.while_loop ?
+        vocab_size = generate_scores.shape[1].value
+        mask = tf.one_hot(self._helper.encoder_inputs_ids, vocab_size)
+        expanded_copy_scores = tf.expand_dims(copy_scores, 2)
+        return generate_scores + tf.reduce_sum(mask * expanded_copy_scores, 1)
+    
+    def step(self, time, inputs, state, name=None):
+        """Perform a decoding step.
+
+        Args:
+        time: scalar `int32` tensor.
+        inputs: A (structure of) input tensors.
+        state: A (structure of) state tensors and TensorArrays.
+        name: Name scope for any created operations.
+
+        Returns:
+        `(outputs, next_state, next_inputs, finished)`.
+        """
+        with ops.name_scope(name, "BasicDecoderStep", (time, inputs, state)):
+            cell_outputs, cell_state = self._cell(inputs, state)
+            generate_scores = self._output_layer(cell_outputs)
+
+            expand_cell_outputs = tf.expand_dims(cell_outputs, 1)
+            print('----expand_cell_output-----')
+            print(self.shape(expand_cell_outputs))
+            print(self.shape(self.copy_weight))
+            print(self.shape(self.encoder_outputs))
+            copy_scores = tf.tensordot(self.encoder_outputs, self.copy_weight, 1)
+            copy_scores = tf.sigmoid(copy_scores)
+            copy_scores = tf.reduce_sum(copy_scores * expand_cell_outputs, [2])
+
+            mix_scores = self._mix(generate_scores, copy_scores)
+
+            sample_ids = self._helper.sample(
+                time=time, outputs=mix_scores, state=cell_state)
+            # sample_ids are not always valid.. TODO
+            (finished, next_inputs, next_state) = self._helper.next_inputs(
+                time=time,
+                outputs=mix_scores,
+                state=cell_state,
+                sample_ids=sample_ids)
+        outputs = BasicDecoderOutput(mix_scores, sample_ids)
+        return (outputs, next_state, next_inputs, finished)
