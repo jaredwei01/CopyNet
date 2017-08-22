@@ -158,33 +158,67 @@ class CopyNetDecoder(BasicDecoder):
     'Incorporating Copying Mechanism in Sequence-to-Sequence Learninag'
     https://arxiv.org/abs/1603.06393
     """
-    def __init__(self, cell, helper, initial_state, encoder_outputs, output_layer):
+    def __init__(self, config, cell, helper, initial_state, 
+                                    encoder_outputs, output_layer):
         """Initialize CopyNetDecoder.
         """
         if output_layer is None:
             raise ValueError("output_layer should not be None")
-        #assert isinstance(helper, helper_py.CopyNetTrainingHelper)
+        assert isinstance(helper, helper_py.CopyNetTrainingHelper)
         self.encoder_outputs = encoder_outputs
         encoder_hidden_size = self.encoder_outputs.shape[-1].value
-        self.copy_weight = tf.get_variable('copy_weight', [encoder_hidden_size, 
-                                                    cell.output_size])
-      
+        self.copy_weight = tf.get_variable('copy_weight', 
+                                [encoder_hidden_size, cell.output_size])
         super(CopyNetDecoder, self).__init__(cell, helper, initial_state, 
                                     output_layer=output_layer)
+
+    @property
+    def output_size(self):
+        # Return the cell output and the id
+        return BasicDecoderOutput(
+            rnn_output=self._rnn_output_size() + 
+                        tf.convert_to_tensor(self.config.encoder_max_seq_len),
+            sample_id=tensor_shape.TensorShape([]))
     
     def shape(self, tensor):
         s = tensor.get_shape()
         return tuple([s[i].value for i in range(0, len(s))])
 
     def _mix(self, generate_scores, copy_scores):
-        # print generate_scores.shape # (B, V)
-        # print copy_scores.shape     # (B, input_seq_len)
-        # print self._helper.inputs_ids # (B, input_seq_len)
-        # tf.while_loop ?
-        vocab_size = generate_scores.shape[1].value
-        mask = tf.one_hot(self._helper.encoder_inputs_ids, vocab_size)
+        # TODO is this correct? should verify the following code.
+        """
+        B is batch_size, V is vocab_size, L is length of every input_id
+        print genreate_scores.shape     --> (B, V)
+        print copy_scores.shape         --> (B, L)
+        print self._helper.inputs_ids   --> (B, L)
+        """
+        # mask is (B, L, V)
+        mask = tf.one_hot(self._helper.encoder_inputs_ids, self.config.vocab_size)
+
+        # choice one, move generate_scores to copy_scores
+        expanded_generate_scores = tf.expand_dim(generate_scores, 1) # (B,1,V)
+        actual_copy_scores = copy_scores + tf.reduce_sum(
+                                mask * expanded_generate_scores, 2)
+        actual_generate_scores = generate_scores - tf.reduce_sum(
+                                mask * expanded_generate_scores, 1)
+
+        # choice two, move copy_scores to generate_scores
+        '''
         expanded_copy_scores = tf.expand_dims(copy_scores, 2)
-        return generate_scores + tf.reduce_sum(mask * expanded_copy_scores, 1)
+        acutual_generate_scores = generate_scores + tf.reduce_sum(
+                                    mask * expanded_copy_scores, 1)
+        acutual_copy_scores = copy_scores - tf.reduce_sum(
+                                    mask * expanded_copy_scores, 2)
+        '''
+
+        mix_scores = tf.concat([actual_generate_scores, actual_copy_scores], 1)
+        mix_scores = tf.nn.softmax(mix_scores, -1) # mix_scores is (B, V+L)
+
+        # make sure mix_socres.shape is (B, V + encoder_max_seq_len)
+        padding_size = self.config.encoder_max_seq_len - self.shape(copy_scores)[1]
+        mix_scores = tf.pad(mix_scores, [[0, 0], [0, padding_size]])
+                
+        return mix_scores
     
     def step(self, time, inputs, state, name=None):
         """Perform a decoding step.
@@ -203,13 +237,9 @@ class CopyNetDecoder(BasicDecoder):
             generate_scores = self._output_layer(cell_outputs)
 
             expand_cell_outputs = tf.expand_dims(cell_outputs, 1)
-            print('----expand_cell_output-----')
-            print(self.shape(expand_cell_outputs))
-            print(self.shape(self.copy_weight))
-            print(self.shape(self.encoder_outputs))
             copy_scores = tf.tensordot(self.encoder_outputs, self.copy_weight, 1)
-            copy_scores = tf.sigmoid(copy_scores)
-            copy_scores = tf.reduce_sum(copy_scores * expand_cell_outputs, [2])
+            copy_scores = tf.nn.tanh(copy_scores)
+            copy_scores = tf.reduce_sum(copy_scores * expand_cell_outputs, 2)
 
             mix_scores = self._mix(generate_scores, copy_scores)
 

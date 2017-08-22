@@ -10,7 +10,7 @@ jieba.initialize()
 
 
 class Vocabulary(object):
-    def __init__(self, max_lines=10000000, min_count=5):
+    def __init__(self, max_lines=10000000, min_count=1):
         self.max_lines = max_lines
         self.min_count = min_count
         self.line_counter = 0
@@ -47,16 +47,29 @@ class Vocabulary(object):
         self.close()
 
     def shrink(self):
-        # shrink the dict by min_count
+        # shrink the dict by min_count, filter uncommon words
         self.words = [word for word, freq in self.wordcount.iteritems()
                       if freq >= self.min_count]
+        # sort these words by descending order
+        self.words = sorted(self.wordcount, key=self.wordcount.get, reverse=True)
         self.word2id = {self.words[i]: i for i in range(len(self.words))}
 
     def close(self):
-        # you should stop update vocabulary after calling this function
+        # use self.closed flag to cope with self.special_words
+        # you should stop updating vocabulary after calling this function
         self.closed = True
         self.words = self.special_words + self.words  # merge special words
         self.word2id = {self.words[i]: i for i in range(len(self.words))}
+
+    def __getitem__(self, key):
+        assert isinstance(key, (unicode, int)), \
+                    'key must be unicode or int, but got %s' % (type(key))
+        if isinstance(key, int):
+            return self.words[key]
+        if isinstance(key, unicode):
+            if not key in self.word2id:
+                key = u"UNK"
+            return self.word2id[key]
 
     def sentence_to_word_ids(self, sentence):
         assert self.closed, 'should close before use this vocabulary'
@@ -107,13 +120,46 @@ class BatchData(object):
         return np.ones((self.config.batch_size, length), dtype='int32'
                        ) * self.vocabulary.word2id[u"PAD"]
 
+    def handle(self, source, target):
+        '''
+        this function is a little difficult to understand, because our demand
+        is a little odd 
+
+        we evaluate every word_id in target, if it appears in the source, replace
+        the word_id with the location in the source
+        '''
+        for i in range(len(target)):
+            flag = True
+            for j in range(len(source)):
+                if target[i] == source[j]:
+                    target[i] = j + self.config.vocab_size
+                    flag = False
+                    break
+            # assign unk if not find in target
+            if target[i] >= self.config.vocab_size and flag:
+                target[i] = self.vocabulary.word2id[u'UNK']
+
+    def handle_reverse(self, source, target):
+        '''
+        reverse of last function, recover the target from the source
+        '''
+        for i in range(len(target)):
+            if target[i] >= self.config.vocab_size:
+                index = target[i] - self.config.vocab_size
+                if index >= len(source):
+                    raise Error('invalid target!')
+                target[i] = source[index]
+
+
+
     def append(self, data):
         '''
         update encoder/decoder inputs/outputs
         '''
         assert self.counter < self.config.batch_size, "out of batch_size"
         self.counter += 1
-        target, source = data
+        # we use long title to predict short title
+        target, source = data 
         # truncate and reverse source
         source = source[0:self.config.encoder_max_seq_len]
         #source.reverse()
@@ -122,6 +168,7 @@ class BatchData(object):
 
         # Add u"START" to target for input
         target = [self.vocabulary.word2id[u"START"]] + target
+        self.handle(source, target)
         target = target[0:self.config.decoder_max_seq_len]
         self.decoder_inputs_lengths.append(len(target))
         self.decoder_inputs[self.counter - 1][0:len(target)] = target
@@ -130,6 +177,7 @@ class BatchData(object):
         target = target[1:] + [self.vocabulary.word2id[u"END"]]
         self.decoder_outputs_lengths.append(len(target))
         self.decoder_outputs[self.counter - 1][0:len(target)] = target
+
 
     def shrink(self):
         # truncate encoder/decoder inputs/outputs

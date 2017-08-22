@@ -11,7 +11,9 @@ config = Config('parameters.json')
 # prepare data
 vocab = data_util.Vocabulary()
 vocab.build_from_file('small.txt')
-print 'got %d words' % (vocab.size)
+print 'got %d words in dictionary' % (vocab.size)
+# should notice that vocab.size is much bigger than config.vocab_size
+
 train_data = data_util.Dataset(vocab, config.copy(dataset_filepath='train.txt'))
 eval_data = data_util.Dataset(vocab, config.copy(dataset_filepath='eval.txt'))
 infer_data = data_util.Dataset(vocab, config.copy(dataset_filepath='infer.txt'))
@@ -26,13 +28,21 @@ encoder_inputs_lengths = tf.placeholder(tf.int32, shape=(config.batch_size,))
 decoder_inputs_lengths = tf.placeholder(tf.int32, shape=(config.batch_size,))
 
 
+def replace_with_unk(inputs):
+    # TODO, should be wrong here, need to replace less_equal with less
+    condition = tf.less_equal(inputs, tf.convert_to_tensor(config.vocab_size))
+    return tf.where(condition, inputs, 
+                        tf.ones_like(inputs) * vocab.word2id[u"UNK"])
+
 def build_model(mode='train'):
     assert mode in {'train', 'eval', 'infer'}, 'invalid mode!'
     # embedding maxtrix
     embedding_matrix = tf.get_variable("embedding_matrix", [
-        vocab.size, config.embedding_size])
-    encoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, encoder_inputs)
-    decoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, decoder_inputs)
+        config.vocab_size, config.embedding_size])
+    encoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, 
+                                        replace_with_unk(encoder_inputs))
+    decoder_inputs_emb = tf.nn.embedding_lookup(embedding_matrix, 
+                                        replace_with_unk(decoder_inputs))
 
     # encoder
     encoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.encoder_hidden_size)
@@ -55,16 +65,14 @@ def build_model(mode='train'):
                         attention_layer_size=config.encoder_hidden_size)
     decoder_initial_state = decoder_cell.zero_state(config.batch_size, 
                                                 dtype=tf.float32)
+    projection_layer = layers_core.Dense(config.vocab_size, use_bias=False)
 
     # decoder
     if mode == 'infer':
-        decoder_initial_state = decoder_cell.zero_state(config.batch_size, 
-                                                    dtype=tf.float32)
         helper = seq2seq.GreedyEmbeddingHelper(
                     embedding_matrix, 
                     tf.fill([config.batch_size], vocab.word2id[u"START"]),
                     vocab.word2id[u"END"])
-        projection_layer = layers_core.Dense(vocab.size, use_bias=False)
         decoder = seq2seq.BasicDecoder(decoder_cell,
                                                   helper,
                                                   decoder_initial_state,
@@ -80,9 +88,7 @@ def build_model(mode='train'):
     helper = seq2seq.CopyNetTrainingHelper(decoder_inputs_emb, encoder_inputs,
                                                decoder_inputs_lengths, 
                                                time_major=False)
-    projection_layer = layers_core.Dense(vocab.size, use_bias=False)
-    decoder = seq2seq.CopyNetDecoder(decoder_cell,
-                                              helper,
+    decoder = seq2seq.CopyNetDecoder(config, decoder_cell, helper,
                                               decoder_initial_state,
                                               encoder_outputs,
                                               output_layer=projection_layer)
